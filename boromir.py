@@ -1,9 +1,7 @@
 import os
-from enum import Enum
 from Registry import Registry
 import sys
 import argparse
-import csv
 from csv import writer
 import pathlib
 import platform
@@ -37,15 +35,26 @@ def parse_arguments():
     parser.add_argument("--source-evidence", help="Directory of windows machine was mount")
     parser.add_argument("--csv-output", help="Resulting CSV")
     parser.add_argument("--timezone", help="All date will be converted to the specific timezone")
-    parser.add_argument("action", help="choose the action to perform",choices=['all', 'Get-Run', 'Get-RunOnce', 'Get-RunEx', 'Get-RunOnceEx', 'Get-ImageFileExecutionOptions', 'Get-NLDPDllOverridePath', 'Get-Aedebug', 'Get-WerFaultHangs', 'Get-CmdAutorun', 'Get-ExplorerLoad', 'Get-WinlogonUserinit', 'Get-WinlogonShell', 'Get-TerminalProfileStartOnUserLogin', 'Get-AppCertDlls', 'Get-AppPaths', 'Get-ServiceDlls', 'Get-GPExtensionDlls', 'Get-WinlogonMPNotify', 'Get-CHMHelperDll', 'Get-StartupPrograms', 'Get-ScheduledTasks', 'Get-WindowsServices', 'Get-UserInitMprScript', 'Get-HHCtrlHijacking'])
+    parser.add_argument("action", help="choose the action to perform", choices=[
+        'all',
+        'Get-Run', 'Get-RunOnce', 'Get-RunEx', 'Get-RunOnceEx',
+        'Get-ImageFileExecutionOptions', 'Get-NLDPDllOverridePath',
+        'Get-Aedebug', 'Get-WerFaultHangs', 'Get-CmdAutorun',
+        'Get-ExplorerLoad', 'Get-WinlogonUserinit', 'Get-WinlogonShell',
+        'Get-TerminalProfileStartOnUserLogin', 'Get-AppCertDlls',
+        'Get-AppPaths', 'Get-ServiceDlls', 'Get-GPExtensionDlls',
+        'Get-WinlogonMPNotify', 'Get-CHMHelperDll', 'Get-StartupPrograms',
+        'Get-ScheduledTasks', 'Get-WindowsServices', 'Get-UserInitMprScript',
+        'Get-HHCtrlHijacking', 'Get-AppInitDlls', 'Get-LsaPackages',
+        'Get-BootExecute', 'Get-ActiveSetup', 'Get-Screensaver',
+        'Get-SilentProcessExit', 'Get-COMHijacking',
+    ])
 
     args = parser.parse_args()
 
-    if args.action=="all" and (args.source_evidence is None):
-        parser.error("parse option requires and evidence")
+    if args.action == "all" and args.source_evidence is None:
+        parser.error("parse option requires an evidence")
 
-
-    args = parser.parse_args()
     return args
 
 def creation_date(path_to_file):
@@ -80,7 +89,7 @@ def access_date(path_to_file):
 
 def change_date(path_to_file):
     if platform.system() == 'Windows':
-        return os.path.getatime(path_to_file)
+        return os.path.getctime(path_to_file)
     else:
         stat = os.stat(path_to_file)
         try:
@@ -311,31 +320,31 @@ def Get_NLDPDllOverridePath():
             languages = reg.open("ControlSet00%d\\Control\\ContentIndex\\Language" % (current))
            
 
-            for languages in languages.subkeys():
-                try :
-                    timestamp = languages.timestamp().strftime(format_date) 
+            for language in languages.subkeys():
+                try:
+                    timestamp = language.timestamp().strftime(format_date)
                 except:
-                    display_name = "???"
+                    timestamp = "???"
                 
                 try:
-                    NoiseFile = languages.value("NoiseFile").value()
+                    NoiseFile = language.value("NoiseFile").value()
                 except:
                     NoiseFile = "???"
-                    
+
                 try:
-                    StemmerDLLPathOverride = languages.value("StemmerDLLPathOverride").value()
+                    StemmerDLLPathOverride = language.value("StemmerDLLPathOverride").value()
                 except:
                     StemmerDLLPathOverride = "No"
 
                 try:
-                    WBDLLPathOverride = languages.value("WBDLLPathOverride").value()
+                    WBDLLPathOverride = language.value("WBDLLPathOverride").value()
                 except:
                     WBDLLPathOverride = "No"
 
-                
+
                 if StemmerDLLPathOverride != "No" or WBDLLPathOverride != "No":
                     persistence = Persistence()
-                    persistence.Timestamp = languages.timestamp().strftime(format_date)
+                    persistence.Timestamp = timestamp
                     persistence.Path = StemmerDLLPathOverride
                     persistence.AccessGained = ""
                     persistence.Technique = 'Natural Language Development Platform 6 DLL Override Path'
@@ -606,26 +615,32 @@ def Get_WinlogonShell():
             None
     
 def Get_TerminalProfileStartOnUserLogin(files):
-    print ("+ Checking if users' Windows Terminal Profile's settings.json contains a startOnUserLogin value.")
+    print("+ Checking if users' Windows Terminal Profile's settings.json contains a startOnUserLogin value.")
 
-
-    try:
-        for file in files:
-            with open(file) as setFile:
-                for item in setFile:
-                    if "commandline" in item:
-                        persistence = Persistence()
-                        persistence.Timestamp = datetime.datetime.fromtimestamp(modification_date(file))
-                        persistence.Path = item.replace('\n', '').strip()
-                        persistence.AccessGained = "System"
-                        persistence.Technique = "Windows Terminal startOnUserLogin"
-                        persistence.Classification = "Uncatalogued Technique N.3"
-                        persistence.Reference = "https://twitter.com/nas_bench/status/1550836225652686848"
-                        persistence.Value = "startOnUserLogin"   
-                        print("\t" + persistence.Path)     
-                        persistences.append(persistence)
-    except:
-        print("Windows terminal startOnUserLogin not detected")
+    import json
+    for file in files:
+        try:
+            with open(file, encoding='utf-8') as setFile:
+                data = json.load(setFile)
+            profiles = data.get("profiles", {})
+            profile_list = profiles.get("list", profiles) if isinstance(profiles, dict) else profiles
+            for profile in profile_list:
+                if not isinstance(profile, dict):
+                    continue
+                if profile.get("startOnUserLogin") is True:
+                    commandline = profile.get("commandline", "N/A")
+                    persistence = Persistence()
+                    persistence.Timestamp = datetime.datetime.fromtimestamp(modification_date(file))
+                    persistence.Path = file
+                    persistence.AccessGained = "User"
+                    persistence.Technique = "Windows Terminal startOnUserLogin"
+                    persistence.Classification = "Uncatalogued Technique N.3"
+                    persistence.Reference = "https://twitter.com/nas_bench/status/1550836225652686848"
+                    persistence.Value = commandline
+                    print("\t" + commandline)
+                    persistences.append(persistence)
+        except Exception:
+            pass
 
 def Get_AppCertDlls():
     print("+ Getting AppCertDlls properties.")
@@ -673,17 +688,25 @@ def Get_AppPaths():
         try:
             reg = Registry.Registry(hive)
             AppPaths = reg.open("SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths")
-            for value in AppPaths.values():      
+            for app in AppPaths.subkeys():
+                try:
+                    exe_path = app.value("(default)").value()
+                except Exception:
+                    try:
+                        exe_path = app.value("").value()
+                    except Exception:
+                        exe_path = "???"
+                if exe_path != "???":
                     persistence = Persistence()
-                    persistence.Timestamp = AppPaths.timestamp().strftime(format_date)
-                    persistence.Path = str(value.name()) + " " + str(value.value())
+                    persistence.Timestamp = app.timestamp().strftime(format_date)
+                    persistence.Path = exe_path
                     persistence.AccessGained = "User"
                     persistence.Technique = "App Paths"
                     persistence.Classification = "Hexacorn Technique N.3"
                     persistence.Reference = "https://www.hexacorn.com/blog/2013/01/19/beyond-good-ol-run-key-part-3/"
-                    persistence.Value = "App Paths"   
-                    print("\t" + persistence.Path)    
-                    persistences.append(persistence) 
+                    persistence.Value = app.name()
+                    print("\t" + persistence.Path)
+                    persistences.append(persistence)
         except:
             None
 
@@ -691,16 +714,24 @@ def Get_AppPaths():
         try:
             reg = Registry.Registry(hive)
             AppPaths = reg.open("Microsoft\Windows\CurrentVersion\App Paths")
-            for value in AppPaths.values():   
+            for app in AppPaths.subkeys():
+                try:
+                    exe_path = app.value("(default)").value()
+                except Exception:
+                    try:
+                        exe_path = app.value("").value()
+                    except Exception:
+                        exe_path = "???"
+                if exe_path != "???":
                     persistence = Persistence()
-                    persistence.Timestamp = AppPaths.timestamp().strftime(format_date)
-                    persistence.Path = str(value.name()) + " " + str(value.value())
+                    persistence.Timestamp = app.timestamp().strftime(format_date)
+                    persistence.Path = exe_path
                     persistence.AccessGained = "System"
                     persistence.Technique = "App Paths"
                     persistence.Classification = "Hexacorn Technique N.3"
                     persistence.Reference = "https://www.hexacorn.com/blog/2013/01/19/beyond-good-ol-run-key-part-3/"
-                    persistence.Value = "App Paths"   
-                    print("\t" + persistence.Path)     
+                    persistence.Value = app.name()
+                    print("\t" + persistence.Path)
                     persistences.append(persistence)
         except:
             None
@@ -773,16 +804,17 @@ def Get_GPExtensionDlls():
                 for value in [v for v in gpextensions.values() \
                    if v.value_type() == Registry.RegSZ or \
                       v.value_type() == Registry.RegExpandSZ]:
-                    persistence = Persistence()
-                    persistence.Timestamp = timestamp
-                    persistence.Path = value.value()
-                    persistence.AccessGained = "User"
-                    persistence.Technique = 'Group Policy Extension DLL'
-                    persistence.Classification = 'Uncatalogued Technique N.4'
-                    persistence.Reference = "https://persistence-info.github.io/Data/gpoextension.html"
-                    persistence.Value = 'Group Policy Extension DLL'
-                    print("\t" + persistence.Value)
-                    persistences.append(persistence)
+                    if value.name() == 'DllName':
+                        persistence = Persistence()
+                        persistence.Timestamp = timestamp
+                        persistence.Path = value.value()
+                        persistence.AccessGained = "User"
+                        persistence.Technique = 'Group Policy Extension DLL'
+                        persistence.Classification = 'Uncatalogued Technique N.4'
+                        persistence.Reference = "https://persistence-info.github.io/Data/gpoextension.html"
+                        persistence.Value = 'Group Policy Extension DLL'
+                        print("\t" + persistence.Path)
+                        persistences.append(persistence)
                 
         except Exception as e:
             None
@@ -908,20 +940,21 @@ def Get_StartupPrograms(files):
         persistences.append(persistence) 
 
 def Get_ScheduledTasks():
-    
+    import xml.etree.ElementTree as ET
+
     print("+ Getting scheduled tasks.")
-    
+
+    # --- Registro ---
     for hive in hives:
         try:
             reg = Registry.Registry(hive)
             tasks = reg.open("Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks")
-    
+
             for task in tasks.subkeys():
                 try:
                     timestamp = task.timestamp().strftime(format_date)
                 except:
                     timestamp = "???"
-
                 try:
                     path = task.value("Path").value()
                 except:
@@ -935,23 +968,21 @@ def Get_ScheduledTasks():
                     persistence.Technique = "Scheduled Task"
                     persistence.Classification = "MITRE ATT&CK T1053.005"
                     persistence.Reference = 'https://attack.mitre.org/techniques/T1053/005/'
-                    persistence.Value = "Scheduled Task"   
-                    print("\t" + persistence.Path)     
-                    persistences.append(persistence)   
+                    persistence.Value = "Scheduled Task"
+                    print("\t" + persistence.Path)
+                    persistences.append(persistence)
         except:
             None
 
         try:
             reg = Registry.Registry(hive)
             tasks = reg.open("SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks")
-            
 
             for task in tasks.subkeys():
                 try:
                     timestamp = task.timestamp().strftime(format_date)
                 except:
                     timestamp = "???"
-
                 try:
                     path = task.value("Path").value()
                 except:
@@ -965,11 +996,56 @@ def Get_ScheduledTasks():
                     persistence.Technique = "Scheduled Task"
                     persistence.Classification = "MITRE ATT&CK T1053.005"
                     persistence.Reference = 'https://attack.mitre.org/techniques/T1053/005/'
-                    persistence.Value = "Scheduled Task"   
-                    print("\t" + persistence.Path)     
-                    persistences.append(persistence)   
+                    persistence.Value = "Scheduled Task"
+                    print("\t" + persistence.Path)
+                    persistences.append(persistence)
         except:
             None
+
+    # --- XML del sistema de ficheros ---
+    from_args = getattr(Get_ScheduledTasks, '_args', None)
+    if from_args and from_args.source_evidence:
+        tasks_dirs = [
+            os.path.join(from_args.source_evidence, "Windows", "System32", "Tasks"),
+            os.path.join(from_args.source_evidence, "Windows", "SysWOW64", "Tasks"),
+        ]
+        ns = {'t': 'http://schemas.microsoft.com/windows/2004/02/mit/task'}
+        for tasks_dir in tasks_dirs:
+            if not os.path.isdir(tasks_dir):
+                continue
+            for root_dir, dirs, files in os.walk(tasks_dir):
+                for fname in files:
+                    xml_path = os.path.join(root_dir, fname)
+                    try:
+                        tree = ET.parse(xml_path)
+                        root_elem = tree.getroot()
+
+                        # Comando ejecutado
+                        exec_elem = root_elem.find('.//t:Exec/t:Command', ns)
+                        args_elem  = root_elem.find('.//t:Exec/t:Arguments', ns)
+                        command = (exec_elem.text or "").strip() if exec_elem is not None else "???"
+                        arguments = (args_elem.text or "").strip() if args_elem is not None else ""
+
+                        if command == "???":
+                            continue
+
+                        try:
+                            mtime = datetime.datetime.fromtimestamp(modification_date(xml_path)).strftime(format_date)
+                        except:
+                            mtime = "???"
+
+                        persistence = Persistence()
+                        persistence.Timestamp = mtime
+                        persistence.Path = xml_path
+                        persistence.AccessGained = "System"
+                        persistence.Technique = "Scheduled Task (XML)"
+                        persistence.Classification = "MITRE ATT&CK T1053.005"
+                        persistence.Reference = 'https://attack.mitre.org/techniques/T1053/005/'
+                        persistence.Value = command + (" " + arguments if arguments else "")
+                        print("\t" + persistence.Value)
+                        persistences.append(persistence)
+                    except Exception:
+                        pass
 
 def Get_WindowsServices():
     print("+ Checking Windows Services.")
@@ -1033,25 +1109,6 @@ def Get_UserInitMprScript():
             reg = Registry.Registry(hive)
             AppPaths = reg.open("Environment")
             for value in AppPaths.values():      
-                if value.name() == "UserInitMprLogonScript":
-                    persistence = Persistence()
-                    persistence.Timestamp = AppPaths.timestamp().strftime(format_date)
-                    persistence.Path = str(value.name()) + " " + str(value.value())
-                    persistence.AccessGained = "User"
-                    persistence.Technique = "User Init Mpr Logon Script"
-                    persistence.Classification = "MITRE ATT&CK T1037.001"
-                    persistence.Reference = 'https://attack.mitre.org/techniques/T1037/001/'
-                    persistence.Value = value.value()   
-                    print("\t" + persistence.Path)    
-                    persistences.append(persistence) 
-        except:
-            None
-
-    for hive in hives:
-        try:
-            reg = Registry.Registry(hive)
-            AppPaths = reg.open("Environment")
-            for value in AppPaths.values(): 
                 if value.name() == "UserInitMprLogonScript":
                     persistence = Persistence()
                     persistence.Timestamp = AppPaths.timestamp().strftime(format_date)
@@ -1166,31 +1223,34 @@ def get_startupfiles(args):
     return startup_files
 
 
-
-def get_startupfiles2(args):
-    return get_startupfiles(args)
-
-
 def Get_Hives(args):
     print("+ Getting hives...")
-    # Usa directamente la carpeta proporcionada como fuente de hives
     hives_dir = args.source_evidence
+
+    # Hives del sistema en el directorio proporcionado
     try:
-        # Lista los archivos en el directorio proporcionado
-        dir_list = os.listdir(hives_dir)
-
-        # Busca los archivos estándar de los hives
-        for file in dir_list:
-            if file in ["SYSTEM", "SOFTWARE", "SAM", "SECURITY", "DEFAULT"] or "NTUSER" in file.upper():
+        for file in os.listdir(hives_dir):
+            if file in ["SYSTEM", "SOFTWARE", "SAM", "SECURITY", "DEFAULT"]:
                 hives.append(os.path.join(hives_dir, file))
-
-        if not hives:
-            print("No registry hives found in the specified directory.")
-        else:
-            for hive in hives:
-                print("\t" + hive)
     except Exception as e:
         print(f"Error accessing the directory: {e}")
+
+    # NTUSER.DAT de cada usuario
+    users_dir = os.path.join(hives_dir, "Users")
+    if os.path.isdir(users_dir):
+        for user in os.listdir(users_dir):
+            user_path = os.path.join(users_dir, user)
+            if not os.path.isdir(user_path):
+                continue
+            for fname in os.listdir(user_path):
+                if "NTUSER" in fname.upper():
+                    hives.append(os.path.join(user_path, fname))
+
+    if not hives:
+        print("No registry hives found.")
+    else:
+        for hive in hives:
+            print("\t" + hive)
 
 
 def output(args):
@@ -1198,18 +1258,264 @@ def output(args):
     persistences_sorted = sorted(persistences, key=lambda p: p.Timestamp)
 
     if args.csv_output:
-        with open(args.csv_output + 'boromir.output.csv', 'a', newline='') as f_object:
+        with open(args.csv_output + 'boromir.output.csv', 'w', newline='') as f_object:
+            writer_object = writer(f_object)
+            writer_object.writerow(['Timestamp', 'Path', 'AccessGained', 'Technique', 'Classification', 'Value'])
             for persistence in persistences_sorted:
-                writer_object = writer(f_object)
                 writer_object.writerow([
-                    persistence.Timestamp, 
-                    persistence.Path, 
-                    persistence.AccessGained, 
-                    persistence.Technique, 
-                    persistence.Classification, 
+                    persistence.Timestamp,
+                    persistence.Path,
+                    persistence.AccessGained,
+                    persistence.Technique,
+                    persistence.Classification,
                     persistence.Value
                 ])
-            f_object.close()
+
+
+def Get_AppInitDlls():
+    print("+ Getting AppInit_DLLs property.")
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            key = reg.open(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows")
+            try:
+                load_flag = key.value("LoadAppInit_DLLs").value()
+            except Exception:
+                load_flag = 1  # si no existe la clave asumimos habilitado
+
+            if load_flag == 0:
+                continue
+
+            for value in key.values():
+                if value.name() == "AppInit_DLLs" and value.value().strip():
+                    persistence = Persistence()
+                    persistence.Timestamp = key.timestamp().strftime(format_date)
+                    persistence.Path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows"
+                    persistence.AccessGained = "System"
+                    persistence.Technique = "AppInit DLLs"
+                    persistence.Classification = "MITRE ATT&CK T1546.010"
+                    persistence.Reference = "https://attack.mitre.org/techniques/T1546/010/"
+                    persistence.Value = value.value()
+                    print("\t" + persistence.Value)
+                    persistences.append(persistence)
+        except:
+            None
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            key = reg.open(r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows")
+            try:
+                load_flag = key.value("LoadAppInit_DLLs").value()
+            except Exception:
+                load_flag = 1
+
+            if load_flag == 0:
+                continue
+
+            for value in key.values():
+                if value.name() == "AppInit_DLLs" and value.value().strip():
+                    persistence = Persistence()
+                    persistence.Timestamp = key.timestamp().strftime(format_date)
+                    persistence.Path = r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows"
+                    persistence.AccessGained = "System"
+                    persistence.Technique = "AppInit DLLs (Wow6432Node)"
+                    persistence.Classification = "MITRE ATT&CK T1546.010"
+                    persistence.Reference = "https://attack.mitre.org/techniques/T1546/010/"
+                    persistence.Value = value.value()
+                    print("\t" + persistence.Value)
+                    persistences.append(persistence)
+        except:
+            None
+
+
+def Get_LsaPackages():
+    print("+ Getting LSA Authentication, Security and Notification Packages.")
+
+    lsa_values = [
+        ("Authentication Packages", "System"),
+        ("Security Packages",       "System"),
+        ("Notification Packages",   "System"),
+    ]
+
+    for hive in hives:
+        for value_name, access in lsa_values:
+            try:
+                reg = Registry.Registry(hive)
+                key = reg.open(r"SYSTEM\CurrentControlSet\Control\Lsa")
+                value = key.value(value_name)
+                # El valor es REG_MULTI_SZ; filtramos entradas vacías y la lista por defecto
+                defaults = {"", "msv1_0", "scecli", "rassfm"}
+                packages = [p for p in value.value() if p.strip() and p.strip().lower() not in defaults]
+                for pkg in packages:
+                    persistence = Persistence()
+                    persistence.Timestamp = key.timestamp().strftime(format_date)
+                    persistence.Path = r"SYSTEM\CurrentControlSet\Control\Lsa"
+                    persistence.AccessGained = access
+                    persistence.Technique = "LSA " + value_name
+                    persistence.Classification = "MITRE ATT&CK T1547.002"
+                    persistence.Reference = "https://attack.mitre.org/techniques/T1547/002/"
+                    persistence.Value = pkg
+                    print("\t" + pkg)
+                    persistences.append(persistence)
+            except:
+                None
+
+
+def Get_BootExecute():
+    print("+ Getting BootExecute property.")
+
+    defaults = {"autocheck autochk *", "autocheck autochk*", ""}
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            key = reg.open(r"SYSTEM\CurrentControlSet\Control\Session Manager")
+            value = key.value("BootExecute")
+            entries = value.value() if isinstance(value.value(), list) else [value.value()]
+            for entry in entries:
+                if entry.strip().lower() in defaults:
+                    continue
+                persistence = Persistence()
+                persistence.Timestamp = key.timestamp().strftime(format_date)
+                persistence.Path = r"SYSTEM\CurrentControlSet\Control\Session Manager"
+                persistence.AccessGained = "System"
+                persistence.Technique = "Boot Execute"
+                persistence.Classification = "MITRE ATT&CK T1542.003"
+                persistence.Reference = "https://attack.mitre.org/techniques/T1542/003/"
+                persistence.Value = entry.strip()
+                print("\t" + persistence.Value)
+                persistences.append(persistence)
+        except:
+            None
+
+
+def Get_ActiveSetup():
+    print("+ Getting Active Setup Installed Components.")
+
+    for hive in hives:
+        for key_path in [
+            r"SOFTWARE\Microsoft\Active Setup\Installed Components",
+            r"SOFTWARE\Wow6432Node\Microsoft\Active Setup\Installed Components",
+        ]:
+            try:
+                reg = Registry.Registry(hive)
+                key = reg.open(key_path)
+                for component in key.subkeys():
+                    try:
+                        stub_path = component.value("StubPath").value().strip()
+                    except Exception:
+                        continue
+                    if not stub_path:
+                        continue
+                    try:
+                        name = component.value("").value()
+                    except Exception:
+                        name = component.name()
+                    persistence = Persistence()
+                    persistence.Timestamp = component.timestamp().strftime(format_date)
+                    persistence.Path = key_path + "\\" + component.name()
+                    persistence.AccessGained = "System"
+                    persistence.Technique = "Active Setup StubPath"
+                    persistence.Classification = "Hexacorn Technique N.54"
+                    persistence.Reference = "https://www.hexacorn.com/blog/2014/07/16/beyond-good-ol-run-key-part-35/"
+                    persistence.Value = stub_path
+                    print("\t" + stub_path)
+                    persistences.append(persistence)
+            except:
+                None
+
+
+def Get_Screensaver():
+    print("+ Getting Screensaver persistence.")
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            key = reg.open(r"Control Panel\Desktop")
+            try:
+                scrnsave = key.value("SCRNSAVE.EXE").value().strip()
+            except Exception:
+                continue
+            if not scrnsave:
+                continue
+            persistence = Persistence()
+            persistence.Timestamp = key.timestamp().strftime(format_date)
+            persistence.Path = hive
+            persistence.AccessGained = "User"
+            persistence.Technique = "Screensaver"
+            persistence.Classification = "MITRE ATT&CK T1546.002"
+            persistence.Reference = "https://attack.mitre.org/techniques/T1546/002/"
+            persistence.Value = scrnsave
+            print("\t" + scrnsave)
+            persistences.append(persistence)
+        except:
+            None
+
+
+def Get_SilentProcessExit():
+    print("+ Getting SilentProcessExit persistence.")
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            key = reg.open(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit")
+            for monitored in key.subkeys():
+                try:
+                    monitor_process = monitored.value("MonitorProcess").value().strip()
+                except Exception:
+                    continue
+                if not monitor_process:
+                    continue
+                try:
+                    reporting_mode = monitored.value("ReportingMode").value()
+                except Exception:
+                    reporting_mode = "???"
+                persistence = Persistence()
+                persistence.Timestamp = monitored.timestamp().strftime(format_date)
+                persistence.Path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit\\" + monitored.name()
+                persistence.AccessGained = "System"
+                persistence.Technique = "Silent Process Exit Monitor"
+                persistence.Classification = "Hexacorn Technique N.116"
+                persistence.Reference = "https://www.hexacorn.com/blog/2019/09/19/silentprocessexit-registry-key-as-a-persistence-mechanism/"
+                persistence.Value = monitor_process
+                print("\t" + monitored.name() + " -> " + monitor_process)
+                persistences.append(persistence)
+        except:
+            None
+
+
+def Get_COMHijacking():
+    print("+ Getting COM Object hijacking (HKCU Classes).")
+
+    for hive in hives:
+        try:
+            reg = Registry.Registry(hive)
+            classes = reg.open(r"Software\Classes\CLSID")
+            for clsid in classes.subkeys():
+                try:
+                    inproc = clsid.subkey("InprocServer32")
+                    try:
+                        dll_path = inproc.value("").value().strip()
+                    except Exception:
+                        dll_path = inproc.value("(default)").value().strip()
+                    if not dll_path:
+                        continue
+                    persistence = Persistence()
+                    persistence.Timestamp = inproc.timestamp().strftime(format_date)
+                    persistence.Path = r"Software\Classes\CLSID\\" + clsid.name() + r"\InprocServer32"
+                    persistence.AccessGained = "User"
+                    persistence.Technique = "COM Object Hijacking"
+                    persistence.Classification = "MITRE ATT&CK T1546.015"
+                    persistence.Reference = "https://attack.mitre.org/techniques/T1546/015/"
+                    persistence.Value = dll_path
+                    print("\t" + clsid.name() + " -> " + dll_path)
+                    persistences.append(persistence)
+                except Exception:
+                    None
+        except:
+            None
 
 
 def run_all(args):
@@ -1235,12 +1541,18 @@ def run_all(args):
     Get_CHMHelperDll()
     startup = get_startupfiles(args)
     Get_StartupPrograms(startup)
-    startup = get_startupfiles2(args)
-    Get_StartupPrograms(startup)
+    Get_ScheduledTasks._args = args
     Get_ScheduledTasks()
     Get_WindowsServices()
     Get_UserInitMprScript()
     Get_HHCtrlHijacking()
+    Get_AppInitDlls()
+    Get_LsaPackages()
+    Get_BootExecute()
+    Get_ActiveSetup()
+    Get_Screensaver()
+    Get_SilentProcessExit()
+    Get_COMHijacking()
 
 def main(arguments):
     Get_Hives(arguments)
@@ -1288,9 +1600,8 @@ def main(arguments):
     elif arguments.action == "Get-StartupPrograms":
         startup = get_startupfiles(arguments)
         Get_StartupPrograms(startup)
-        startup = get_startupfiles2(arguments)
-        Get_StartupPrograms(startup)
     elif arguments.action == "Get-ScheduledTasks":
+        Get_ScheduledTasks._args = arguments
         Get_ScheduledTasks()
     elif arguments.action == "Get-WindowsServices":
         Get_WindowsServices()
@@ -1298,6 +1609,20 @@ def main(arguments):
         Get_UserInitMprScript()
     elif arguments.action == "Get-HHCtrlHijacking":
         Get_HHCtrlHijacking()
+    elif arguments.action == "Get-AppInitDlls":
+        Get_AppInitDlls()
+    elif arguments.action == "Get-LsaPackages":
+        Get_LsaPackages()
+    elif arguments.action == "Get-BootExecute":
+        Get_BootExecute()
+    elif arguments.action == "Get-ActiveSetup":
+        Get_ActiveSetup()
+    elif arguments.action == "Get-Screensaver":
+        Get_Screensaver()
+    elif arguments.action == "Get-SilentProcessExit":
+        Get_SilentProcessExit()
+    elif arguments.action == "Get-COMHijacking":
+        Get_COMHijacking()
 
     if arguments.csv_output:
         output(arguments)
